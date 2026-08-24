@@ -118,6 +118,46 @@ class RamFileSystem
         std::string GetParentPath(const std::string& path) const;
         bool IsValidPath(const std::string& path) const;
         bool IsFileOpen(const std::shared_ptr<File>& file) const;
+
+        /* Unlocked Implementations - caller must already hold m_mutex */
+        bool IsMountedUnlocked() const;
+        bool MountUnlocked(const std::string& mount_point);
+        bool UnmountUnlocked();
+
+        bool CreateFileUnlocked(const std::string& path);
+        bool WriteFileUnlocked(const std::string& path, const std::string& data);
+        std::optional<std::string> ReadFileUnlocked(const std::string& path) const;
+        bool DeleteFileUnlocked(const std::string& path);
+
+        std::size_t GetUsedSpaceUnlocked() const;
+        std::size_t GetAvailableSpaceUnlocked() const;
+
+        bool AppendFileUnlocked(const std::string& path, const std::string& data);
+        bool FileExistsUnlocked(const std::string& path) const;
+        std::optional<std::size_t> GetFileSizeUnlocked(const std::string& path) const;
+        bool RenameFileUnlocked(const std::string& old_path, const std::string& new_path);
+        bool ClearFileUnlocked(const std::string& path);
+        std::optional<FileHandle> OpenFileUnlocked(const std::string& path, OpenMode mode);
+        bool CloseFileUnlocked(FileHandle handle);
+        std::optional<std::string> ReadOpenFileUnlocked(FileHandle handle, std::size_t count);
+        bool WriteOpenFileUnlocked(FileHandle handle, const std::string& data);
+
+        bool SeekFileUnlocked(FileHandle handle, std::size_t offset);
+        std::optional<std::size_t> GetFileOffsetUnlocked(FileHandle handle) const;
+
+        bool CreateDirectoryUnlocked(const std::string& path);
+        bool DirectoryExistsUnlocked(const std::string& path) const;
+        bool DeleteDirectoryUnlocked(const std::string& path);
+        bool DeleteDirectoryRecursiveUnlocked(const std::string& path);
+        std::optional<std::vector<DirectoryEntry>> ListDirectoryUnlocked(const std::string& path) const;
+
+        bool SetFileReadableUnlocked(const std::string& path, bool readable);
+        bool SetFileWritableUnlocked(const std::string& path, bool writable);
+
+        std::optional<bool> IsFileReadableUnlocked(const std::string& path) const;
+        std::optional<bool> IsFileWritableUnlocked(const std::string& path) const;
+
+        std::optional<FileMetadata> GetFileMetadataUnlocked(const std::string& path) const;
 };
 
 

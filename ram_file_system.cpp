@@ -13,7 +13,7 @@ std::string RamFileSystem::GetParentPath(const std::string& path) const
     }
 
     return path.substr(0, slash_position);
-}  
+}
 
 bool RamFileSystem::IsValidPath(const std::string& path) const
 {
@@ -48,17 +48,16 @@ bool RamFileSystem::IsFileOpen(const std::shared_ptr<File>& file) const
     return false;
 }
 
-/*********************************** API Implementation ****************************************/
+/*************** Unlocked Implementations (caller must hold m_mutex) ****************/
 
-RamFileSystem::RamFileSystem(std::size_t capacity) : m_is_mounted(false) ,m_capacity(capacity),
- m_used_space(0), m_next_handle(1)
+bool RamFileSystem::IsMountedUnlocked() const
 {
-    m_directories.emplace("/");
+    return m_is_mounted;
 }
 
-bool RamFileSystem::Mount(const std::string& mount_point)
+bool RamFileSystem::MountUnlocked(const std::string& mount_point)
 {
-    if(IsMounted())
+    if(IsMountedUnlocked())
     {
         return false;
     }
@@ -74,9 +73,9 @@ bool RamFileSystem::Mount(const std::string& mount_point)
     return true;
 }
 
-bool RamFileSystem::Unmount()
+bool RamFileSystem::UnmountUnlocked()
 {
-    if(!IsMounted())
+    if(!IsMountedUnlocked())
     {
         return false;
     }
@@ -87,9 +86,9 @@ bool RamFileSystem::Unmount()
     return true;
 }
 
-bool RamFileSystem::CreateFile(const std::string& path)
+bool RamFileSystem::CreateFileUnlocked(const std::string& path)
 {
-    if(!IsMounted()|| !IsValidPath(path))
+    if(!IsMountedUnlocked()|| !IsValidPath(path))
     {
         return false;
     }
@@ -101,7 +100,7 @@ bool RamFileSystem::CreateFile(const std::string& path)
 
     const std::string parent_path = GetParentPath(path);
 
-    if(!DirectoryExists(parent_path))
+    if(!DirectoryExistsUnlocked(parent_path))
     {
         return false;
     }
@@ -116,9 +115,9 @@ bool RamFileSystem::CreateFile(const std::string& path)
     return true;
 }
 
-bool RamFileSystem::WriteFile(const std::string& path, const std::string& data)
+bool RamFileSystem::WriteFileUnlocked(const std::string& path, const std::string& data)
 {
-    if(!IsMounted() || path.empty())
+    if(!IsMountedUnlocked() || path.empty())
     {
         return false;
     }
@@ -145,9 +144,9 @@ bool RamFileSystem::WriteFile(const std::string& path, const std::string& data)
     return true;
 }
 
-std::optional<std::string> RamFileSystem::ReadFile(const std::string& path) const
-{   
-    if(!IsMounted() || path.empty())
+std::optional<std::string> RamFileSystem::ReadFileUnlocked(const std::string& path) const
+{
+    if(!IsMountedUnlocked() || path.empty())
     {
         return std::nullopt;
     }
@@ -162,9 +161,9 @@ std::optional<std::string> RamFileSystem::ReadFile(const std::string& path) cons
     return file_it->second->data;
 }
 
-bool RamFileSystem::DeleteFile(const std::string& path)
+bool RamFileSystem::DeleteFileUnlocked(const std::string& path)
 {
-    if (!IsMounted() || path.empty())
+    if (!IsMountedUnlocked() || path.empty())
     {
         return false;
     }
@@ -190,24 +189,19 @@ bool RamFileSystem::DeleteFile(const std::string& path)
     return true;
 }
 
-bool RamFileSystem::IsMounted() const
-{
-    return m_is_mounted;
-}
-
-std::size_t RamFileSystem::GetUsedSpace() const
+std::size_t RamFileSystem::GetUsedSpaceUnlocked() const
 {
     return m_used_space;
-}   
+}
 
-std::size_t RamFileSystem::GetAvailableSpace() const
+std::size_t RamFileSystem::GetAvailableSpaceUnlocked() const
 {
     return m_capacity - m_used_space;
 }
 
-bool RamFileSystem::AppendFile(const std::string& path, const std::string& data)
+bool RamFileSystem::AppendFileUnlocked(const std::string& path, const std::string& data)
 {
-    if(!IsMounted() || path.empty())
+    if(!IsMountedUnlocked() || path.empty())
     {
         return false;
     }
@@ -222,7 +216,7 @@ bool RamFileSystem::AppendFile(const std::string& path, const std::string& data)
     {
         return false;
     }
-    
+
     file_it->second->data += data;
     file_it->second->modification_time = std::time(nullptr);
     m_used_space += data.size();
@@ -230,9 +224,9 @@ bool RamFileSystem::AppendFile(const std::string& path, const std::string& data)
     return true;
 }
 
-bool RamFileSystem::FileExists(const std::string& path) const
+bool RamFileSystem::FileExistsUnlocked(const std::string& path) const
 {
-    if(!IsMounted() || path.empty())
+    if(!IsMountedUnlocked() || path.empty())
     {
         return false;
     }
@@ -240,9 +234,9 @@ bool RamFileSystem::FileExists(const std::string& path) const
     return m_files.find(path) != m_files.end();
 }
 
-std::optional<std::size_t> RamFileSystem::GetFileSize(const std::string& path) const
+std::optional<std::size_t> RamFileSystem::GetFileSizeUnlocked(const std::string& path) const
 {
-    if(!IsMounted() || path.empty())
+    if(!IsMountedUnlocked() || path.empty())
     {
         return std::nullopt;
     }
@@ -256,9 +250,9 @@ std::optional<std::size_t> RamFileSystem::GetFileSize(const std::string& path) c
     return file_it->second->data.size();
 }
 
-bool RamFileSystem::RenameFile(const std::string& old_path, const std::string& new_path)
+bool RamFileSystem::RenameFileUnlocked(const std::string& old_path, const std::string& new_path)
 {
-    if(!IsMounted() || !IsValidPath(old_path) || !IsValidPath(new_path))
+    if(!IsMountedUnlocked() || !IsValidPath(old_path) || !IsValidPath(new_path))
     {
         return false;
     }
@@ -275,7 +269,7 @@ bool RamFileSystem::RenameFile(const std::string& old_path, const std::string& n
         return false;
     }
 
-    if(!DirectoryExists(GetParentPath(new_path)))
+    if(!DirectoryExistsUnlocked(GetParentPath(new_path)))
     {
         return false;
     }
@@ -283,14 +277,13 @@ bool RamFileSystem::RenameFile(const std::string& old_path, const std::string& n
     auto file_node = m_files.extract(old_path_it);
     file_node.key() = new_path;
     m_files.insert(std::move(file_node));
-    
+
     return true;
 }
 
-
-bool RamFileSystem::ClearFile(const std::string& path)
+bool RamFileSystem::ClearFileUnlocked(const std::string& path)
 {
-    if(!IsMounted() || path.empty())
+    if(!IsMountedUnlocked() || path.empty())
     {
         return false;
     }
@@ -304,13 +297,13 @@ bool RamFileSystem::ClearFile(const std::string& path)
     m_used_space -= file_it->second->data.size();
     file_it->second->data.clear();
     file_it->second->modification_time = std::time(nullptr);
-    
+
     return true;
 }
 
-bool RamFileSystem::CreateDirectory(const std::string& path)
+bool RamFileSystem::CreateDirectoryUnlocked(const std::string& path)
 {
-    if(!IsMounted() || !IsValidPath(path))
+    if(!IsMountedUnlocked() || !IsValidPath(path))
     {
         return false;
     }
@@ -328,13 +321,13 @@ bool RamFileSystem::CreateDirectory(const std::string& path)
     }
 
     m_directories.emplace(path);
-    
+
     return true;
 }
 
-bool RamFileSystem::DirectoryExists(const std::string& path) const
+bool RamFileSystem::DirectoryExistsUnlocked(const std::string& path) const
 {
-    if(!IsMounted() || path.empty())
+    if(!IsMountedUnlocked() || path.empty())
     {
         return false;
     }
@@ -342,9 +335,9 @@ bool RamFileSystem::DirectoryExists(const std::string& path) const
     return m_directories.find(path) != m_directories.end();
 }
 
-bool RamFileSystem::DeleteDirectory(const std::string& path)
+bool RamFileSystem::DeleteDirectoryUnlocked(const std::string& path)
 {
-    if(!IsMounted() || path.empty() || path == "/")
+    if(!IsMountedUnlocked() || path.empty() || path == "/")
     {
         return false;
     }
@@ -378,14 +371,14 @@ bool RamFileSystem::DeleteDirectory(const std::string& path)
     return true;
 }
 
-std::optional<std::vector<RamFileSystem::DirectoryEntry>> RamFileSystem::ListDirectory(const std::string& path) const
+std::optional<std::vector<RamFileSystem::DirectoryEntry>> RamFileSystem::ListDirectoryUnlocked(const std::string& path) const
 {
-    if(!IsMounted() || path.empty())
+    if(!IsMountedUnlocked() || path.empty())
     {
         return std::nullopt;
     }
 
-    if(!DirectoryExists(path))
+    if(!DirectoryExistsUnlocked(path))
     {
         return std::nullopt;
     }
@@ -423,7 +416,7 @@ std::optional<std::vector<RamFileSystem::DirectoryEntry>> RamFileSystem::ListDir
         }
 
     }
-    std::sort(result.begin(), result.end(), [](const DirectoryEntry& lhs, const DirectoryEntry& rhs)    
+    std::sort(result.begin(), result.end(), [](const DirectoryEntry& lhs, const DirectoryEntry& rhs)
     {
         if(lhs.is_directory != rhs.is_directory)
         {
@@ -436,14 +429,14 @@ std::optional<std::vector<RamFileSystem::DirectoryEntry>> RamFileSystem::ListDir
     return result;
 }
 
-bool RamFileSystem::DeleteDirectoryRecursive(const std::string& path)
+bool RamFileSystem::DeleteDirectoryRecursiveUnlocked(const std::string& path)
 {
-    if(!IsMounted() || path.empty() || path == "/")
+    if(!IsMountedUnlocked() || path.empty() || path == "/")
     {
         return false;
     }
-    
-    if (!DirectoryExists(path))
+
+    if (!DirectoryExistsUnlocked(path))
     {
         return false;
     }
@@ -491,9 +484,9 @@ bool RamFileSystem::DeleteDirectoryRecursive(const std::string& path)
     return true;
 }
 
-std::optional<FileHandle> RamFileSystem::OpenFile(const std::string& path, OpenMode mode)
+std::optional<FileHandle> RamFileSystem::OpenFileUnlocked(const std::string& path, OpenMode mode)
 {
-    if (!IsMounted() || path.empty())
+    if (!IsMountedUnlocked() || path.empty())
     {
         return std::nullopt;
     }
@@ -546,9 +539,9 @@ std::optional<FileHandle> RamFileSystem::OpenFile(const std::string& path, OpenM
     return handle;
 }
 
-bool RamFileSystem::CloseFile(FileHandle handle)
+bool RamFileSystem::CloseFileUnlocked(FileHandle handle)
 {
-    if(!IsMounted())
+    if(!IsMountedUnlocked())
     {
         return false;
     }
@@ -566,9 +559,9 @@ bool RamFileSystem::CloseFile(FileHandle handle)
 }
 
 std::optional<std::string>
-RamFileSystem::ReadOpenFile(FileHandle handle, std::size_t count)
+RamFileSystem::ReadOpenFileUnlocked(FileHandle handle, std::size_t count)
 {
-    if (!IsMounted())
+    if (!IsMountedUnlocked())
     {
         return std::nullopt;
     }
@@ -599,9 +592,9 @@ RamFileSystem::ReadOpenFile(FileHandle handle, std::size_t count)
     return result;
 }
 
-bool RamFileSystem::WriteOpenFile(FileHandle handle, const std::string& data)
+bool RamFileSystem::WriteOpenFileUnlocked(FileHandle handle, const std::string& data)
 {
-    if (!IsMounted())
+    if (!IsMountedUnlocked())
     {
         return false;
     }
@@ -639,9 +632,9 @@ bool RamFileSystem::WriteOpenFile(FileHandle handle, const std::string& data)
     return true;
 }
 
-bool RamFileSystem::SeekFile(FileHandle handle, std::size_t offset)
+bool RamFileSystem::SeekFileUnlocked(FileHandle handle, std::size_t offset)
 {
-    if(!IsMounted())
+    if(!IsMountedUnlocked())
     {
         return false;
     }
@@ -665,9 +658,9 @@ bool RamFileSystem::SeekFile(FileHandle handle, std::size_t offset)
     return true;
 }
 
-std::optional<std::size_t> RamFileSystem::GetFileOffset(FileHandle handle) const
+std::optional<std::size_t> RamFileSystem::GetFileOffsetUnlocked(FileHandle handle) const
 {
-    if(!IsMounted())
+    if(!IsMountedUnlocked())
     {
         return std::nullopt;
     }
@@ -681,9 +674,9 @@ std::optional<std::size_t> RamFileSystem::GetFileOffset(FileHandle handle) const
     return handle_it->second.offset;
 }
 
-bool RamFileSystem::SetFileReadable(const std::string& path, bool readable)
+bool RamFileSystem::SetFileReadableUnlocked(const std::string& path, bool readable)
 {
-    if(!IsMounted() || path.empty())
+    if(!IsMountedUnlocked() || path.empty())
     {
         return false;
     }
@@ -699,9 +692,9 @@ bool RamFileSystem::SetFileReadable(const std::string& path, bool readable)
     return true;
 }
 
-bool RamFileSystem::SetFileWritable(const std::string& path, bool writable)
+bool RamFileSystem::SetFileWritableUnlocked(const std::string& path, bool writable)
 {
-    if(!IsMounted() || path.empty())
+    if(!IsMountedUnlocked() || path.empty())
     {
         return false;
     }
@@ -717,9 +710,9 @@ bool RamFileSystem::SetFileWritable(const std::string& path, bool writable)
     return true;
 }
 
-std::optional<bool> RamFileSystem::IsFileReadable(const std::string& path) const
+std::optional<bool> RamFileSystem::IsFileReadableUnlocked(const std::string& path) const
 {
-    if(!IsMounted() || path.empty())
+    if(!IsMountedUnlocked() || path.empty())
     {
         return std::nullopt;
     }
@@ -733,9 +726,9 @@ std::optional<bool> RamFileSystem::IsFileReadable(const std::string& path) const
     return file_it->second->readable;
 }
 
-std::optional<bool> RamFileSystem::IsFileWritable(const std::string& path) const
+std::optional<bool> RamFileSystem::IsFileWritableUnlocked(const std::string& path) const
 {
-    if(!IsMounted() || path.empty())
+    if(!IsMountedUnlocked() || path.empty())
     {
         return std::nullopt;
     }
@@ -749,9 +742,9 @@ std::optional<bool> RamFileSystem::IsFileWritable(const std::string& path) const
     return file_it->second->writable;
 }
 
-std::optional<RamFileSystem::FileMetadata> RamFileSystem::GetFileMetadata(const std::string& path) const
+std::optional<RamFileSystem::FileMetadata> RamFileSystem::GetFileMetadataUnlocked(const std::string& path) const
 {
-    if(!IsMounted() || path.empty())
+    if(!IsMountedUnlocked() || path.empty())
     {
         return std::nullopt;
     }
@@ -772,4 +765,192 @@ std::optional<RamFileSystem::FileMetadata> RamFileSystem::GetFileMetadata(const 
     metadata.modification_time = file->modification_time;
 
     return metadata;
+}
+
+/*********************************** Public API (locking) ****************************************/
+
+RamFileSystem::RamFileSystem(std::size_t capacity) : m_is_mounted(false) ,m_capacity(capacity),
+ m_used_space(0), m_next_handle(1)
+{
+    m_directories.emplace("/");
+}
+
+bool RamFileSystem::Mount(const std::string& mount_point)
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    return MountUnlocked(mount_point);
+}
+
+bool RamFileSystem::Unmount()
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    return UnmountUnlocked();
+}
+
+bool RamFileSystem::CreateFile(const std::string& path)
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    return CreateFileUnlocked(path);
+}
+
+bool RamFileSystem::WriteFile(const std::string& path, const std::string& data)
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    return WriteFileUnlocked(path, data);
+}
+
+std::optional<std::string> RamFileSystem::ReadFile(const std::string& path) const
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    return ReadFileUnlocked(path);
+}
+
+bool RamFileSystem::DeleteFile(const std::string& path)
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    return DeleteFileUnlocked(path);
+}
+
+bool RamFileSystem::IsMounted() const
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    return IsMountedUnlocked();
+}
+
+std::size_t RamFileSystem::GetUsedSpace() const
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    return GetUsedSpaceUnlocked();
+}
+
+std::size_t RamFileSystem::GetAvailableSpace() const
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    return GetAvailableSpaceUnlocked();
+}
+
+bool RamFileSystem::AppendFile(const std::string& path, const std::string& data)
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    return AppendFileUnlocked(path, data);
+}
+
+bool RamFileSystem::FileExists(const std::string& path) const
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    return FileExistsUnlocked(path);
+}
+
+std::optional<std::size_t> RamFileSystem::GetFileSize(const std::string& path) const
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    return GetFileSizeUnlocked(path);
+}
+
+bool RamFileSystem::RenameFile(const std::string& old_path, const std::string& new_path)
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    return RenameFileUnlocked(old_path, new_path);
+}
+
+bool RamFileSystem::ClearFile(const std::string& path)
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    return ClearFileUnlocked(path);
+}
+
+bool RamFileSystem::CreateDirectory(const std::string& path)
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    return CreateDirectoryUnlocked(path);
+}
+
+bool RamFileSystem::DirectoryExists(const std::string& path) const
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    return DirectoryExistsUnlocked(path);
+}
+
+bool RamFileSystem::DeleteDirectory(const std::string& path)
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    return DeleteDirectoryUnlocked(path);
+}
+
+std::optional<std::vector<RamFileSystem::DirectoryEntry>> RamFileSystem::ListDirectory(const std::string& path) const
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    return ListDirectoryUnlocked(path);
+}
+
+bool RamFileSystem::DeleteDirectoryRecursive(const std::string& path)
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    return DeleteDirectoryRecursiveUnlocked(path);
+}
+
+std::optional<FileHandle> RamFileSystem::OpenFile(const std::string& path, OpenMode mode)
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    return OpenFileUnlocked(path, mode);
+}
+
+bool RamFileSystem::CloseFile(FileHandle handle)
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    return CloseFileUnlocked(handle);
+}
+
+std::optional<std::string> RamFileSystem::ReadOpenFile(FileHandle handle, std::size_t count)
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    return ReadOpenFileUnlocked(handle, count);
+}
+
+bool RamFileSystem::WriteOpenFile(FileHandle handle, const std::string& data)
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    return WriteOpenFileUnlocked(handle, data);
+}
+
+bool RamFileSystem::SeekFile(FileHandle handle, std::size_t offset)
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    return SeekFileUnlocked(handle, offset);
+}
+
+std::optional<std::size_t> RamFileSystem::GetFileOffset(FileHandle handle) const
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    return GetFileOffsetUnlocked(handle);
+}
+
+bool RamFileSystem::SetFileReadable(const std::string& path, bool readable)
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    return SetFileReadableUnlocked(path, readable);
+}
+
+bool RamFileSystem::SetFileWritable(const std::string& path, bool writable)
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    return SetFileWritableUnlocked(path, writable);
+}
+
+std::optional<bool> RamFileSystem::IsFileReadable(const std::string& path) const
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    return IsFileReadableUnlocked(path);
+}
+
+std::optional<bool> RamFileSystem::IsFileWritable(const std::string& path) const
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    return IsFileWritableUnlocked(path);
+}
+
+std::optional<RamFileSystem::FileMetadata> RamFileSystem::GetFileMetadata(const std::string& path) const
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    return GetFileMetadataUnlocked(path);
 }

@@ -15,24 +15,62 @@ std::string RamFileSystem::GetParentPath(const std::string& path) const
     return path.substr(0, slash_position);
 }
 
-bool RamFileSystem::IsValidPath(const std::string& path) const
+std::optional<std::string> RamFileSystem::CanonicalizePath(const std::string& path) const
 {
     if(path.empty() || path[0] != '/')
     {
-        return false;
+        return std::nullopt;
     }
 
-    if(path.size() > 1 && path.back() == '/')
+    std::vector<std::string> segments;
+    std::size_t i = 1;
+
+    while(i <= path.size())
     {
-        return false;
+        std::size_t next_slash = path.find('/', i);
+
+        if(next_slash == std::string::npos)
+        {
+            next_slash = path.size();
+        }
+
+        const std::string segment = path.substr(i, next_slash - i);
+
+        if(segment.empty() || segment == ".")
+        {
+            // no-op: repeated slashes and "." both refer to the current directory
+        }
+        else if(segment == "..")
+        {
+            if(segments.empty())
+            {
+                return std::nullopt;
+            }
+
+            segments.pop_back();
+        }
+        else
+        {
+            segments.push_back(segment);
+        }
+
+        i = next_slash + 1;
     }
 
-    if(path.find("//") != std::string::npos)
+    if(segments.empty())
     {
-        return false;
+        return std::string{"/"};
     }
 
-    return true;
+    std::string result;
+
+    for(const auto& segment : segments)
+    {
+        result += "/";
+        result += segment;
+    }
+
+    return result;
 }
 
 bool RamFileSystem::IsFileOpen(const std::shared_ptr<File>& file) const
@@ -88,17 +126,23 @@ bool RamFileSystem::UnmountUnlocked()
 
 bool RamFileSystem::CreateFileUnlocked(const std::string& path)
 {
-    if(!IsMountedUnlocked()|| !IsValidPath(path))
+    if(!IsMountedUnlocked())
     {
         return false;
     }
 
-    if(m_files.find(path) != m_files.end())
+    const auto canonical_path = CanonicalizePath(path);
+    if(!canonical_path)
     {
         return false;
     }
 
-    const std::string parent_path = GetParentPath(path);
+    if(m_files.find(*canonical_path) != m_files.end())
+    {
+        return false;
+    }
+
+    const std::string parent_path = GetParentPath(*canonical_path);
 
     if(!DirectoryExistsUnlocked(parent_path))
     {
@@ -110,19 +154,25 @@ bool RamFileSystem::CreateFileUnlocked(const std::string& path)
 
     file->creation_time = now;
     file->modification_time = now;
-    m_files.emplace(path, file);
+    m_files.emplace(*canonical_path, file);
 
     return true;
 }
 
 bool RamFileSystem::WriteFileUnlocked(const std::string& path, const std::string& data)
 {
-    if(!IsMountedUnlocked() || path.empty())
+    if(!IsMountedUnlocked())
     {
         return false;
     }
 
-    auto file_it = m_files.find(path);
+    const auto canonical_path = CanonicalizePath(path);
+    if(!canonical_path)
+    {
+        return false;
+    }
+
+    auto file_it = m_files.find(*canonical_path);
 
     if(file_it == m_files.end())
     {
@@ -146,12 +196,18 @@ bool RamFileSystem::WriteFileUnlocked(const std::string& path, const std::string
 
 std::optional<std::string> RamFileSystem::ReadFileUnlocked(const std::string& path) const
 {
-    if(!IsMountedUnlocked() || path.empty())
+    if(!IsMountedUnlocked())
     {
         return std::nullopt;
     }
 
-    auto file_it = m_files.find(path);
+    const auto canonical_path = CanonicalizePath(path);
+    if(!canonical_path)
+    {
+        return std::nullopt;
+    }
+
+    auto file_it = m_files.find(*canonical_path);
 
     if(file_it == m_files.end())
     {
@@ -163,12 +219,18 @@ std::optional<std::string> RamFileSystem::ReadFileUnlocked(const std::string& pa
 
 bool RamFileSystem::DeleteFileUnlocked(const std::string& path)
 {
-    if (!IsMountedUnlocked() || path.empty())
+    if (!IsMountedUnlocked())
     {
         return false;
     }
 
-    auto file_it = m_files.find(path);
+    const auto canonical_path = CanonicalizePath(path);
+    if(!canonical_path)
+    {
+        return false;
+    }
+
+    auto file_it = m_files.find(*canonical_path);
 
     if (file_it == m_files.end())
     {
@@ -201,12 +263,18 @@ std::size_t RamFileSystem::GetAvailableSpaceUnlocked() const
 
 bool RamFileSystem::AppendFileUnlocked(const std::string& path, const std::string& data)
 {
-    if(!IsMountedUnlocked() || path.empty())
+    if(!IsMountedUnlocked())
     {
         return false;
     }
 
-    auto file_it = m_files.find(path);
+    const auto canonical_path = CanonicalizePath(path);
+    if(!canonical_path)
+    {
+        return false;
+    }
+
+    auto file_it = m_files.find(*canonical_path);
     if(file_it == m_files.end())
     {
         return false;
@@ -226,22 +294,34 @@ bool RamFileSystem::AppendFileUnlocked(const std::string& path, const std::strin
 
 bool RamFileSystem::FileExistsUnlocked(const std::string& path) const
 {
-    if(!IsMountedUnlocked() || path.empty())
+    if(!IsMountedUnlocked())
     {
         return false;
     }
 
-    return m_files.find(path) != m_files.end();
+    const auto canonical_path = CanonicalizePath(path);
+    if(!canonical_path)
+    {
+        return false;
+    }
+
+    return m_files.find(*canonical_path) != m_files.end();
 }
 
 std::optional<std::size_t> RamFileSystem::GetFileSizeUnlocked(const std::string& path) const
 {
-    if(!IsMountedUnlocked() || path.empty())
+    if(!IsMountedUnlocked())
     {
         return std::nullopt;
     }
 
-    const auto file_it = m_files.find(path);
+    const auto canonical_path = CanonicalizePath(path);
+    if(!canonical_path)
+    {
+        return std::nullopt;
+    }
+
+    const auto file_it = m_files.find(*canonical_path);
     if(file_it == m_files.end())
     {
         return std::nullopt;
@@ -252,43 +332,110 @@ std::optional<std::size_t> RamFileSystem::GetFileSizeUnlocked(const std::string&
 
 bool RamFileSystem::RenameFileUnlocked(const std::string& old_path, const std::string& new_path)
 {
-    if(!IsMountedUnlocked() || !IsValidPath(old_path) || !IsValidPath(new_path))
+    if(!IsMountedUnlocked())
     {
         return false;
     }
 
-    auto old_path_it = m_files.find(old_path);
+    const auto old_canonical = CanonicalizePath(old_path);
+    const auto new_canonical = CanonicalizePath(new_path);
+
+    if(!old_canonical || !new_canonical)
+    {
+        return false;
+    }
+
+    auto old_path_it = m_files.find(*old_canonical);
     if(old_path_it == m_files.end())
     {
         return false;
     }
 
-    auto new_path_it = m_files.find(new_path);
+    auto new_path_it = m_files.find(*new_canonical);
     if(new_path_it != m_files.end())
     {
         return false;
     }
 
-    if(!DirectoryExistsUnlocked(GetParentPath(new_path)))
+    if(!DirectoryExistsUnlocked(GetParentPath(*new_canonical)))
     {
         return false;
     }
 
     auto file_node = m_files.extract(old_path_it);
-    file_node.key() = new_path;
+    file_node.key() = *new_canonical;
     m_files.insert(std::move(file_node));
+
+    return true;
+}
+
+bool RamFileSystem::CopyFileUnlocked(const std::string& source_path, const std::string& destination_path)
+{
+    if(!IsMountedUnlocked())
+    {
+        return false;
+    }
+
+    const auto source_canonical = CanonicalizePath(source_path);
+    const auto destination_canonical = CanonicalizePath(destination_path);
+
+    if(!source_canonical || !destination_canonical)
+    {
+        return false;
+    }
+
+    auto source_it = m_files.find(*source_canonical);
+    if(source_it == m_files.end())
+    {
+        return false;
+    }
+
+    if(m_files.find(*destination_canonical) != m_files.end())
+    {
+        return false;
+    }
+
+    if(!DirectoryExistsUnlocked(GetParentPath(*destination_canonical)))
+    {
+        return false;
+    }
+
+    const std::size_t new_used_space = m_used_space + source_it->second->data.size();
+
+    if(new_used_space > m_capacity)
+    {
+        return false;
+    }
+
+    auto new_file = std::make_shared<File>();
+    const std::time_t now = std::time(nullptr);
+
+    new_file->data = source_it->second->data;
+    new_file->readable = source_it->second->readable;
+    new_file->writable = source_it->second->writable;
+    new_file->creation_time = now;
+    new_file->modification_time = now;
+
+    m_files.emplace(*destination_canonical, new_file);
+    m_used_space = new_used_space;
 
     return true;
 }
 
 bool RamFileSystem::ClearFileUnlocked(const std::string& path)
 {
-    if(!IsMountedUnlocked() || path.empty())
+    if(!IsMountedUnlocked())
     {
         return false;
     }
 
-    auto file_it = m_files.find(path);
+    const auto canonical_path = CanonicalizePath(path);
+    if(!canonical_path)
+    {
+        return false;
+    }
+
+    auto file_it = m_files.find(*canonical_path);
     if(file_it == m_files.end())
     {
         return false;
@@ -303,52 +450,70 @@ bool RamFileSystem::ClearFileUnlocked(const std::string& path)
 
 bool RamFileSystem::CreateDirectoryUnlocked(const std::string& path)
 {
-    if(!IsMountedUnlocked() || !IsValidPath(path))
+    if(!IsMountedUnlocked())
     {
         return false;
     }
 
-    if(m_directories.find(path) != m_directories.end())
+    const auto canonical_path = CanonicalizePath(path);
+    if(!canonical_path)
     {
         return false;
     }
 
-    const std::string parent_path = GetParentPath(path);
+    if(m_directories.find(*canonical_path) != m_directories.end())
+    {
+        return false;
+    }
+
+    const std::string parent_path = GetParentPath(*canonical_path);
 
     if(m_directories.find(parent_path) == m_directories.end())
     {
         return false;
     }
 
-    m_directories.emplace(path);
+    m_directories.emplace(*canonical_path);
 
     return true;
 }
 
 bool RamFileSystem::DirectoryExistsUnlocked(const std::string& path) const
 {
-    if(!IsMountedUnlocked() || path.empty())
+    if(!IsMountedUnlocked())
     {
         return false;
     }
 
-    return m_directories.find(path) != m_directories.end();
+    const auto canonical_path = CanonicalizePath(path);
+    if(!canonical_path)
+    {
+        return false;
+    }
+
+    return m_directories.find(*canonical_path) != m_directories.end();
 }
 
 bool RamFileSystem::DeleteDirectoryUnlocked(const std::string& path)
 {
-    if(!IsMountedUnlocked() || path.empty() || path == "/")
+    if(!IsMountedUnlocked())
     {
         return false;
     }
 
-    auto path_iter = m_directories.find(path);
+    const auto canonical_path = CanonicalizePath(path);
+    if(!canonical_path || *canonical_path == "/")
+    {
+        return false;
+    }
+
+    auto path_iter = m_directories.find(*canonical_path);
     if(path_iter == m_directories.end())
     {
         return false;
     }
 
-    const std::string child_prefix = path + "/";
+    const std::string child_prefix = *canonical_path + "/";
 
     for(const auto& file_entry : m_files)
     {
@@ -373,18 +538,24 @@ bool RamFileSystem::DeleteDirectoryUnlocked(const std::string& path)
 
 std::optional<std::vector<RamFileSystem::DirectoryEntry>> RamFileSystem::ListDirectoryUnlocked(const std::string& path) const
 {
-    if(!IsMountedUnlocked() || path.empty())
+    if(!IsMountedUnlocked())
     {
         return std::nullopt;
     }
 
-    if(!DirectoryExistsUnlocked(path))
+    const auto canonical_path = CanonicalizePath(path);
+    if(!canonical_path)
+    {
+        return std::nullopt;
+    }
+
+    if(!DirectoryExistsUnlocked(*canonical_path))
     {
         return std::nullopt;
     }
 
     std::vector<DirectoryEntry> result;
-    const std::string prefix = path == "/" ? "/" : path + "/";
+    const std::string prefix = *canonical_path == "/" ? "/" : *canonical_path + "/";
 
     for(const auto& file_entry : m_files)
     {
@@ -431,17 +602,23 @@ std::optional<std::vector<RamFileSystem::DirectoryEntry>> RamFileSystem::ListDir
 
 bool RamFileSystem::DeleteDirectoryRecursiveUnlocked(const std::string& path)
 {
-    if(!IsMountedUnlocked() || path.empty() || path == "/")
+    if(!IsMountedUnlocked())
     {
         return false;
     }
 
-    if (!DirectoryExistsUnlocked(path))
+    const auto canonical_path = CanonicalizePath(path);
+    if(!canonical_path || *canonical_path == "/")
     {
         return false;
     }
 
-    const std::string prefix = path + "/";
+    if (!DirectoryExistsUnlocked(*canonical_path))
+    {
+        return false;
+    }
+
+    const std::string prefix = *canonical_path + "/";
 
     for (const auto& file_entry : m_files)
     {
@@ -479,19 +656,121 @@ bool RamFileSystem::DeleteDirectoryRecursiveUnlocked(const std::string& path)
         }
     }
 
-    m_directories.erase(path);
+    m_directories.erase(*canonical_path);
+
+    return true;
+}
+
+bool RamFileSystem::MoveDirectoryUnlocked(const std::string& old_path, const std::string& new_path)
+{
+    if(!IsMountedUnlocked())
+    {
+        return false;
+    }
+
+    const auto old_canonical = CanonicalizePath(old_path);
+    const auto new_canonical = CanonicalizePath(new_path);
+
+    if(!old_canonical || !new_canonical || *old_canonical == "/")
+    {
+        return false;
+    }
+
+    const std::string& old_dir = *old_canonical;
+    const std::string& new_dir = *new_canonical;
+
+    if(m_directories.find(old_dir) == m_directories.end())
+    {
+        return false;
+    }
+
+    if(m_directories.find(new_dir) != m_directories.end() || m_files.find(new_dir) != m_files.end())
+    {
+        return false;
+    }
+
+    const std::string old_prefix = old_dir + "/";
+
+    if(new_dir.compare(0, old_prefix.size(), old_prefix) == 0)
+    {
+        return false;
+    }
+
+    if(!DirectoryExistsUnlocked(GetParentPath(new_dir)))
+    {
+        return false;
+    }
+
+    std::vector<std::string> directories_to_move;
+    for(const auto& directory : m_directories)
+    {
+        if(directory == old_dir || directory.compare(0, old_prefix.size(), old_prefix) == 0)
+        {
+            directories_to_move.push_back(directory);
+        }
+    }
+
+    std::vector<std::string> files_to_move;
+    for(const auto& file_entry : m_files)
+    {
+        if(file_entry.first.compare(0, old_prefix.size(), old_prefix) == 0)
+        {
+            files_to_move.push_back(file_entry.first);
+        }
+    }
+
+    const std::string new_prefix = new_dir + "/";
+
+    for(const auto& directory : directories_to_move)
+    {
+        const std::string relocated = directory == old_dir ? new_dir : new_prefix + directory.substr(old_prefix.size());
+        if(m_directories.find(relocated) != m_directories.end())
+        {
+            return false;
+        }
+    }
+
+    for(const auto& file_path : files_to_move)
+    {
+        const std::string relocated = new_prefix + file_path.substr(old_prefix.size());
+        if(m_files.find(relocated) != m_files.end())
+        {
+            return false;
+        }
+    }
+
+    for(const auto& directory : directories_to_move)
+    {
+        const std::string relocated = directory == old_dir ? new_dir : new_prefix + directory.substr(old_prefix.size());
+        m_directories.erase(directory);
+        m_directories.emplace(relocated);
+    }
+
+    for(const auto& file_path : files_to_move)
+    {
+        const std::string relocated = new_prefix + file_path.substr(old_prefix.size());
+        auto file_node = m_files.extract(file_path);
+        file_node.key() = relocated;
+        m_files.insert(std::move(file_node));
+    }
 
     return true;
 }
 
 std::optional<FileHandle> RamFileSystem::OpenFileUnlocked(const std::string& path, OpenMode mode)
 {
-    if (!IsMountedUnlocked() || path.empty())
+    if (!IsMountedUnlocked())
     {
         return std::nullopt;
     }
 
-    auto file_it = m_files.find(path);
+    const auto canonical_path = CanonicalizePath(path);
+    if(!canonical_path)
+    {
+        return std::nullopt;
+    }
+
+    auto file_it = m_files.find(*canonical_path);
 
     if (file_it == m_files.end())
     {
@@ -676,12 +955,18 @@ std::optional<std::size_t> RamFileSystem::GetFileOffsetUnlocked(FileHandle handl
 
 bool RamFileSystem::SetFileReadableUnlocked(const std::string& path, bool readable)
 {
-    if(!IsMountedUnlocked() || path.empty())
+    if(!IsMountedUnlocked())
     {
         return false;
     }
 
-    auto file_it = m_files.find(path);
+    const auto canonical_path = CanonicalizePath(path);
+    if(!canonical_path)
+    {
+        return false;
+    }
+
+    auto file_it = m_files.find(*canonical_path);
     if(file_it == m_files.end())
     {
         return false;
@@ -694,12 +979,18 @@ bool RamFileSystem::SetFileReadableUnlocked(const std::string& path, bool readab
 
 bool RamFileSystem::SetFileWritableUnlocked(const std::string& path, bool writable)
 {
-    if(!IsMountedUnlocked() || path.empty())
+    if(!IsMountedUnlocked())
     {
         return false;
     }
 
-    auto file_it = m_files.find(path);
+    const auto canonical_path = CanonicalizePath(path);
+    if(!canonical_path)
+    {
+        return false;
+    }
+
+    auto file_it = m_files.find(*canonical_path);
     if(file_it == m_files.end())
     {
         return false;
@@ -712,12 +1003,18 @@ bool RamFileSystem::SetFileWritableUnlocked(const std::string& path, bool writab
 
 std::optional<bool> RamFileSystem::IsFileReadableUnlocked(const std::string& path) const
 {
-    if(!IsMountedUnlocked() || path.empty())
+    if(!IsMountedUnlocked())
     {
         return std::nullopt;
     }
 
-    auto file_it = m_files.find(path);
+    const auto canonical_path = CanonicalizePath(path);
+    if(!canonical_path)
+    {
+        return std::nullopt;
+    }
+
+    auto file_it = m_files.find(*canonical_path);
     if(file_it == m_files.end())
     {
         return std::nullopt;
@@ -728,12 +1025,18 @@ std::optional<bool> RamFileSystem::IsFileReadableUnlocked(const std::string& pat
 
 std::optional<bool> RamFileSystem::IsFileWritableUnlocked(const std::string& path) const
 {
-    if(!IsMountedUnlocked() || path.empty())
+    if(!IsMountedUnlocked())
     {
         return std::nullopt;
     }
 
-    auto file_it = m_files.find(path);
+    const auto canonical_path = CanonicalizePath(path);
+    if(!canonical_path)
+    {
+        return std::nullopt;
+    }
+
+    auto file_it = m_files.find(*canonical_path);
     if(file_it == m_files.end())
     {
         return std::nullopt;
@@ -744,12 +1047,18 @@ std::optional<bool> RamFileSystem::IsFileWritableUnlocked(const std::string& pat
 
 std::optional<RamFileSystem::FileMetadata> RamFileSystem::GetFileMetadataUnlocked(const std::string& path) const
 {
-    if(!IsMountedUnlocked() || path.empty())
+    if(!IsMountedUnlocked())
     {
         return std::nullopt;
     }
 
-    auto file_it = m_files.find(path);
+    const auto canonical_path = CanonicalizePath(path);
+    if(!canonical_path)
+    {
+        return std::nullopt;
+    }
+
+    auto file_it = m_files.find(*canonical_path);
     if(file_it == m_files.end())
     {
         return std::nullopt;
@@ -853,6 +1162,12 @@ bool RamFileSystem::RenameFile(const std::string& old_path, const std::string& n
     return RenameFileUnlocked(old_path, new_path);
 }
 
+bool RamFileSystem::CopyFile(const std::string& source_path, const std::string& destination_path)
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    return CopyFileUnlocked(source_path, destination_path);
+}
+
 bool RamFileSystem::ClearFile(const std::string& path)
 {
     std::lock_guard<std::mutex> lock(m_mutex);
@@ -887,6 +1202,12 @@ bool RamFileSystem::DeleteDirectoryRecursive(const std::string& path)
 {
     std::lock_guard<std::mutex> lock(m_mutex);
     return DeleteDirectoryRecursiveUnlocked(path);
+}
+
+bool RamFileSystem::MoveDirectory(const std::string& old_path, const std::string& new_path)
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    return MoveDirectoryUnlocked(old_path, new_path);
 }
 
 std::optional<FileHandle> RamFileSystem::OpenFile(const std::string& path, OpenMode mode)

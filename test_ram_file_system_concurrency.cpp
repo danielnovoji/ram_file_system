@@ -31,9 +31,10 @@ int main()
     auto worker = [&](int thread_id)
     {
         std::mt19937 rng(thread_id * 7919u + 12345u);
-        std::uniform_int_distribution<int> op_dist(0, 15);
+        std::uniform_int_distribution<int> op_dist(0, 17);
         std::uniform_int_distribution<int> dir_dist(0, kNumDirs - 1);
         std::uniform_int_distribution<int> file_dist(0, kNumFiles - 1);
+        std::uniform_int_distribution<int> sub_dist(0, 1);
 
         for(int i = 0; i < kIterationsPerThread; ++i)
         {
@@ -41,8 +42,11 @@ int main()
             const int file_a = file_dist(rng);
             const int file_b = file_dist(rng);
             const std::string dir_path = "/dir" + std::to_string(dir);
-            const std::string path_a = dir_path + "/file" + std::to_string(file_a) + ".txt";
-            const std::string path_b = dir_path + "/file" + std::to_string(file_b) + ".txt";
+            const bool use_dotted_form = (i % 4) == 0;
+            const std::string path_a = use_dotted_form
+                ? dir_path + "/./file" + std::to_string(file_a) + ".txt"
+                : dir_path + "/file" + std::to_string(file_a) + ".txt";
+            const std::string path_b = dir_path + "/../dir" + std::to_string(dir) + "/file" + std::to_string(file_b) + ".txt";
             const std::string data = "thread" + std::to_string(thread_id) + "-iter" + std::to_string(i);
 
             switch(op_dist(rng))
@@ -120,6 +124,18 @@ int main()
                     auto available = fs.GetAvailableSpace();
                     (void)used;
                     (void)available;
+                    break;
+                }
+                case 15:
+                    fs.CopyFile(path_a, path_b);
+                    break;
+                case 16:
+                {
+                    const int other_dir = dir_dist(rng);
+                    const std::string sub_from = dir_path + "/sub" + std::to_string(sub_dist(rng));
+                    const std::string sub_to = "/dir" + std::to_string(other_dir) + "/moved" + std::to_string(sub_dist(rng));
+                    fs.CreateDirectory(sub_from);
+                    fs.MoveDirectory(sub_from, sub_to);
                     break;
                 }
                 default:

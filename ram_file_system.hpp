@@ -57,6 +57,7 @@ class RamFileSystem
         bool FileExists(const std::string& path) const;
         std::optional<std::size_t> GetFileSize(const std::string& path) const;
         bool RenameFile(const std::string& old_path, const std::string& new_path);
+        bool CopyFile(const std::string& source_path, const std::string& destination_path);
         bool ClearFile(const std::string& path);
         std::optional<FileHandle> OpenFile(const std::string& path, OpenMode mode);
         bool CloseFile(FileHandle handle);
@@ -72,6 +73,7 @@ class RamFileSystem
         bool DirectoryExists(const std::string& path) const;
         bool DeleteDirectory(const std::string& path);
         bool DeleteDirectoryRecursive(const std::string& path);
+        bool MoveDirectory(const std::string& old_path, const std::string& new_path);
         std::optional<std::vector<DirectoryEntry>> ListDirectory(const std::string& path) const;
 
         /* File Permission Functions */
@@ -116,7 +118,7 @@ class RamFileSystem
 
         /* Private Helper Functions */
         std::string GetParentPath(const std::string& path) const;
-        bool IsValidPath(const std::string& path) const;
+        std::optional<std::string> CanonicalizePath(const std::string& path) const;
         bool IsFileOpen(const std::shared_ptr<File>& file) const;
 
         /* Unlocked Implementations - caller must already hold m_mutex */
@@ -136,6 +138,7 @@ class RamFileSystem
         bool FileExistsUnlocked(const std::string& path) const;
         std::optional<std::size_t> GetFileSizeUnlocked(const std::string& path) const;
         bool RenameFileUnlocked(const std::string& old_path, const std::string& new_path);
+        bool CopyFileUnlocked(const std::string& source_path, const std::string& destination_path);
         bool ClearFileUnlocked(const std::string& path);
         std::optional<FileHandle> OpenFileUnlocked(const std::string& path, OpenMode mode);
         bool CloseFileUnlocked(FileHandle handle);
@@ -149,6 +152,7 @@ class RamFileSystem
         bool DirectoryExistsUnlocked(const std::string& path) const;
         bool DeleteDirectoryUnlocked(const std::string& path);
         bool DeleteDirectoryRecursiveUnlocked(const std::string& path);
+        bool MoveDirectoryUnlocked(const std::string& old_path, const std::string& new_path);
         std::optional<std::vector<DirectoryEntry>> ListDirectoryUnlocked(const std::string& path) const;
 
         bool SetFileReadableUnlocked(const std::string& path, bool readable);

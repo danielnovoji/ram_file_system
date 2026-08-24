@@ -35,6 +35,19 @@ bool RamFileSystem::IsValidPath(const std::string& path) const
     return true;
 }
 
+bool RamFileSystem::IsFileOpen(const std::shared_ptr<File>& file) const
+{
+    for(const auto& open_entry : m_open_files)
+    {
+        if(open_entry.second.file == file)
+        {
+            return true;
+        }
+    }
+
+    return false;
+}
+
 /*********************************** API Implementation ****************************************/
 
 RamFileSystem::RamFileSystem(std::size_t capacity) : m_is_mounted(false) ,m_capacity(capacity),
@@ -93,7 +106,12 @@ bool RamFileSystem::CreateFile(const std::string& path)
         return false;
     }
 
-    m_files.emplace(path, std::make_shared<File>());
+    const std::time_t now = std::time(nullptr);
+    auto file = std::make_shared<File>();
+
+    file->creation_time = now;
+    file->modification_time = now;
+    m_files.emplace(path, file);
 
     return true;
 }
@@ -121,7 +139,7 @@ bool RamFileSystem::WriteFile(const std::string& path, const std::string& data)
     }
 
     file_it->second->data = data;
-
+    file_it->second->modification_time = std::time(nullptr);
     m_used_space = new_used_space;
 
     return true;
@@ -206,7 +224,7 @@ bool RamFileSystem::AppendFile(const std::string& path, const std::string& data)
     }
     
     file_it->second->data += data;
-
+    file_it->second->modification_time = std::time(nullptr);
     m_used_space += data.size();
 
     return true;
@@ -285,6 +303,7 @@ bool RamFileSystem::ClearFile(const std::string& path)
 
     m_used_space -= file_it->second->data.size();
     file_it->second->data.clear();
+    file_it->second->modification_time = std::time(nullptr);
     
     return true;
 }
@@ -423,8 +442,24 @@ bool RamFileSystem::DeleteDirectoryRecursive(const std::string& path)
     {
         return false;
     }
+    
+    if (!DirectoryExists(path))
+    {
+        return false;
+    }
 
     const std::string prefix = path + "/";
+
+    for (const auto& file_entry : m_files)
+    {
+        if (file_entry.first.compare(0, prefix.size(), prefix) == 0)
+        {
+            if (IsFileOpen(file_entry.second))
+            {
+                return false;
+            }
+        }
+    }
 
     for(auto it = m_files.begin(); it != m_files.end(); )
     {
@@ -458,13 +493,34 @@ bool RamFileSystem::DeleteDirectoryRecursive(const std::string& path)
 
 std::optional<FileHandle> RamFileSystem::OpenFile(const std::string& path, OpenMode mode)
 {
-    if(!IsMounted() || path.empty())
+    if (!IsMounted() || path.empty())
     {
         return std::nullopt;
     }
 
     auto file_it = m_files.find(path);
-    if(file_it == m_files.end())
+
+    if (file_it == m_files.end())
+    {
+        return std::nullopt;
+    }
+
+    const std::shared_ptr<File>& file = file_it->second;
+
+    if (mode == OpenMode::ReadOnly && !file->readable)
+    {
+        return std::nullopt;
+    }
+
+    if ((mode == OpenMode::WriteOnly ||
+         mode == OpenMode::Append) &&
+        !file->writable)
+    {
+        return std::nullopt;
+    }
+
+    if (mode == OpenMode::ReadWrite &&
+        (!file->readable || !file->writable))
     {
         return std::nullopt;
     }
@@ -472,17 +528,20 @@ std::optional<FileHandle> RamFileSystem::OpenFile(const std::string& path, OpenM
     const FileHandle handle = m_next_handle++;
 
     std::size_t initial_offset = 0;
-    
-    if(mode == OpenMode::Append)
+
+    if (mode == OpenMode::Append)
     {
-        initial_offset = file_it->second->data.size();
+        initial_offset = file->data.size();
     }
 
-    m_open_files.emplace(handle, OpenFileEntry{
-        file_it->second,
-        initial_offset,
-        mode
-    });
+    m_open_files.emplace(
+        handle,
+        OpenFileEntry{
+            file,
+            initial_offset,
+            mode
+        }
+    );
 
     return handle;
 }
@@ -516,7 +575,12 @@ RamFileSystem::ReadOpenFile(FileHandle handle, std::size_t count)
 
     const auto handle_it = m_open_files.find(handle);
 
-    if (handle_it == m_open_files.end() || handle_it->second.mode == OpenMode::WriteOnly)
+    if (handle_it == m_open_files.end())
+    {
+        return std::nullopt;
+    }
+
+    if (handle_it->second.mode == OpenMode::WriteOnly || handle_it->second.mode == OpenMode::Append)
     {
         return std::nullopt;
     }
@@ -567,9 +631,10 @@ bool RamFileSystem::WriteOpenFile(FileHandle handle, const std::string& data)
 
     file->data.replace(offset, data.size(), data);
 
-    handle_it->second.offset = data.size();
+    handle_it->second.offset = offset + data.size();
 
     m_used_space = used_without_file + new_file_size;
+    file->modification_time = std::time(nullptr);
 
     return true;
 }
@@ -614,4 +679,97 @@ std::optional<std::size_t> RamFileSystem::GetFileOffset(FileHandle handle) const
     }
 
     return handle_it->second.offset;
+}
+
+bool RamFileSystem::SetFileReadable(const std::string& path, bool readable)
+{
+    if(!IsMounted() || path.empty())
+    {
+        return false;
+    }
+
+    auto file_it = m_files.find(path);
+    if(file_it == m_files.end())
+    {
+        return false;
+    }
+
+    file_it->second->readable = readable;
+
+    return true;
+}
+
+bool RamFileSystem::SetFileWritable(const std::string& path, bool writable)
+{
+    if(!IsMounted() || path.empty())
+    {
+        return false;
+    }
+
+    auto file_it = m_files.find(path);
+    if(file_it == m_files.end())
+    {
+        return false;
+    }
+
+    file_it->second->writable = writable;
+
+    return true;
+}
+
+std::optional<bool> RamFileSystem::IsFileReadable(const std::string& path) const
+{
+    if(!IsMounted() || path.empty())
+    {
+        return std::nullopt;
+    }
+
+    auto file_it = m_files.find(path);
+    if(file_it == m_files.end())
+    {
+        return std::nullopt;
+    }
+
+    return file_it->second->readable;
+}
+
+std::optional<bool> RamFileSystem::IsFileWritable(const std::string& path) const
+{
+    if(!IsMounted() || path.empty())
+    {
+        return std::nullopt;
+    }
+
+    auto file_it = m_files.find(path);
+    if(file_it == m_files.end())
+    {
+        return std::nullopt;
+    }
+
+    return file_it->second->writable;
+}
+
+std::optional<RamFileSystem::FileMetadata> RamFileSystem::GetFileMetadata(const std::string& path) const
+{
+    if(!IsMounted() || path.empty())
+    {
+        return std::nullopt;
+    }
+
+    auto file_it = m_files.find(path);
+    if(file_it == m_files.end())
+    {
+        return std::nullopt;
+    }
+
+    const auto& file = file_it->second;
+
+    FileMetadata metadata;
+    metadata.size = file->data.size();
+    metadata.readable = file->readable;
+    metadata.writable = file->writable;
+    metadata.creation_time = file->creation_time;
+    metadata.modification_time = file->modification_time;
+
+    return metadata;
 }
